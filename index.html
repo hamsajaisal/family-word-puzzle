@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Word Puzzle</title>
+    <style>
+        :root {
+            --primary: #4A90E2;
+            --secondary: #F39C12;
+            --bg: #F9F9FB;
+            --text: #333;
+            --grid-bg: #fff;
+            --selected: #2ECC71;
+            --error: #E74C3C;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+
+        h1 { color: var(--primary); }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* Setup Screen */
+        #setup-screen, #end-screen {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        select, button {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+
+        button:hover, button:focus {
+            background-color: #357ABD;
+            outline: 3px solid var(--secondary);
+        }
+
+        /* Game Screen */
+        #game-screen {
+            display: none;
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .player-turn { color: var(--primary); font-size: 22px; margin-bottom: 10px;}
+
+        /* Grid */
+        #grid-container {
+            display: grid;
+            gap: 10px;
+            margin: 20px auto;
+            justify-content: center;
+        }
+
+        .letter-btn {
+            width: 70px;
+            height: 70px;
+            font-size: 32px;
+            font-weight: bold;
+            background-color: var(--grid-bg);
+            color: var(--text);
+            border: 3px solid #ccc;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 4px 0 #ccc;
+            text-transform: uppercase;
+        }
+
+        .letter-btn[aria-pressed="true"] {
+            background-color: var(--selected);
+            color: white;
+            border-color: #27AE60;
+            box-shadow: 0 2px 0 #27AE60;
+            transform: translateY(2px);
+        }
+
+        .letter-btn:focus {
+            outline: 4px solid var(--secondary);
+            outline-offset: 4px;
+        }
+
+        /* Controls */
+        #current-word-display {
+            font-size: 28px;
+            letter-spacing: 4px;
+            margin: 20px 0;
+            min-height: 40px;
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        #controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        #submit-btn { background-color: var(--secondary); width: auto; padding: 12px 30px;}
+        #submit-btn:hover { background-color: #D68910; }
+
+    </style>
+</head>
+<body>
+
+    <div id="announcer" class="sr-only" aria-live="assertive"></div>
+    <div id="word-announcer" class="sr-only" aria-live="polite"></div>
+
+    <div id="setup-screen">
+        <h1>Word Puzzle</h1>
+        <div class="form-group">
+            <label for="mode">Game Mode</label>
+            <select id="mode">
+                <option value="1">Single Player</option>
+                <option value="2">Two Players</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="grid-size">Grid Size</label>
+            <select id="grid-size">
+                <option value="3x3">3 × 3</option>
+                <option value="4x4">4 × 4</option>
+                <option value="5x4">5 × 4</option>
+                <option value="5x5">5 × 5</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="time-limit">Time Limit</label>
+            <select id="time-limit">
+                <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
+                <option value="300">5 Minutes</option>
+            </select>
+        </div>
+        <button id="start-btn">Start Game</button>
+    </div>
+
+    <div id="game-screen">
+        <div id="turn-indicator" class="player-turn" aria-live="polite"></div>
+        <div class="status-bar">
+            <div id="score-display" aria-live="polite">Score: 0</div>
+            <div id="timer-display" aria-live="polite">Time: 1:00</div>
+        </div>
+
+        <div id="current-word-display" aria-hidden="true"></div>
+        
+        <div id="grid-container" role="group" aria-label="Letter Grid"></div>
+
+        <div id="controls">
+            <button id="submit-btn" aria-label="Double click to submit word, or press Enter">Done (Double Click)</button>
+        </div>
+    </div>
+
+    <div id="end-screen" style="display: none;">
+        <h1>Game Over!</h1>
+        <div id="results" aria-live="polite"></div>
+        <button id="restart-btn" style="margin-top: 20px;">Play Again</button>
+    </div>
+
+<script>
+    // --- Basic Kid-Friendly Dictionary for Demo ---
+    // In a full production app, you would link this to a dictionary API.
+    const validWords = new Set(["CAT", "DOG", "BAT", "BALL", "APPLE", "SUN", "FUN", "RUN", "MAT", "HAT", "SIT", "MOM", "DAD", "BOY", "GIRL", "TREE", "CAR", "STAR", "FISH", "BIRD", "RED", "BLUE", "GREEN", "ONE", "TWO", "PLAY", "JUMP", "SING", "READ", "BOOK"]);
+
+    let state = {
+        mode: 1, rows: 3, cols: 3, time: 60,
+        timerInterval: null,
+        players: [{score: 0, words: [], longest: ""}, {score: 0, words: [], longest: ""}],
+        currentPlayer: 0,
+        selectedButtons: [],
+        currentWord: "",
+        gridLetters: []
+    };
+
+    const vowels = "AEIOU";
+    const consonants = "BCDFGHJKLMNPQRSTVWXYZ";
+
+    // DOM Elements
+    const setupScreen = document.getElementById('setup-screen');
+    const gameScreen = document.getElementById('game-screen');
+    const endScreen = document.getElementById('end-screen');
+    const gridContainer = document.getElementById('grid-container');
+    const announcer = document.getElementById('announcer');
+    const wordAnnouncer = document.getElementById('word-announcer');
+
+    // Init
+    document.getElementById('start-btn').addEventListener('click', startGame);
+    document.getElementById('restart-btn').addEventListener('click', () => {
+        endScreen.style.display = 'none';
+        setupScreen.style.display = 'block';
+        document.getElementById('start-btn').focus();
+    });
+
+    document.getElementById('submit-btn').addEventListener('dblclick', submitCurrentWord);
+
+    function announce(message) {
+        announcer.textContent = '';
+        setTimeout(() => { announcer.textContent = message; }, 50);
+    }
+
+    function startGame() {
+        // Capture settings
+        state.mode = parseInt(document.getElementById('mode').value);
+        let size = document.getElementById('grid-size').value.split('x');
+        state.rows = parseInt(size[0]);
+        state.cols = parseInt(size[1]);
+        state.time = parseInt(document.getElementById('time-limit').value);
+        
+        // Reset state
+        state.players = [{score: 0, words: [], longest: ""}, {score: 0, words: [], longest: ""}];
+        state.currentPlayer = 0;
+        state.selectedButtons = [];
+        state.currentWord = "";
+        
+        setupScreen.style.display = 'none';
+        gameScreen.style.display = 'block';
+        
+        generateGrid();
+        updateDisplay();
+        startTimer();
+        
+        let modeText = state.mode === 1 ? "Single player game started." : "Two player game started. Player 1's turn.";
+        announce(`${modeText} You have ${state.time} seconds. Use arrow keys to navigate the grid.`);
+        
+        // Focus first letter
+        setTimeout(() => document.querySelector('.letter-btn').focus(), 100);
+    }
+
+    function generateGrid() {
+        gridContainer.innerHTML = '';
+        gridContainer.style.gridTemplateColumns = `repeat(${state.cols}, 1fr)`;
+        state.gridLetters = [];
+
+        for (let r = 0; r < state.rows; r++) {
+            for (let c = 0; c < state.cols; c++) {
+                // Ensure a good mix of vowels and consonants
+                let isVowel = Math.random() > 0.6; 
+                let letterSet = isVowel ? vowels : consonants;
+                let letter = letterSet[Math.floor(Math.random() * letterSet.length)];
+                
+                let btn = document.createElement('button');
+                btn.className = 'letter-btn';
+                btn.textContent = letter;
+                btn.setAttribute('aria-pressed', 'false');
+                btn.setAttribute('aria-label', `${letter}, row ${r+1} column ${c+1}`);
+                btn.dataset.row = r;
+                btn.dataset.col = c;
+                
+                btn.addEventListener('click', () => toggleLetter(btn));
+                btn.addEventListener('keydown', handleGridNavigation);
+                
+                gridContainer.appendChild(btn);
+            }
+        }
+    }
+
+    function handleGridNavigation(e) {
+        const row = parseInt(e.target.dataset.row);
+        const col = parseInt(e.target.dataset.col);
+        let newRow = row;
+        let newCol = col;
+
+        if (e.key === 'ArrowUp') newRow = Math.max(0, row - 1);
+        else if (e.key === 'ArrowDown') newRow = Math.min(state.rows - 1, row + 1);
+        else if (e.key === 'ArrowLeft') newCol = Math.max(0, col - 1);
+        else if (e.key === 'ArrowRight') newCol = Math.min(state.cols - 1, col + 1);
+        else if (e.key === 'Enter') {
+            e.preventDefault();
+            submitCurrentWord();
+            return;
+        } else {
+            return; // Not a navigation key
+        }
+
+        e.preventDefault();
+        const targetBtn = document.querySelector(`.letter-btn[data-row="${newRow}"][data-col="${newCol}"]`);
+        if (targetBtn) targetBtn.focus();
+    }
+
+    function toggleLetter(btn) {
+        const isPressed = btn.getAttribute('aria-pressed') === 'true';
+        
+        if (isPressed) {
+            // Only allow deselecting the LAST selected letter
+            if (state.selectedButtons[state.selectedButtons.length - 1] === btn) {
+                btn.setAttribute('aria-pressed', 'false');
+                state.selectedButtons.pop();
+                state.currentWord = state.currentWord.slice(0, -1);
+            } else {
+                announce("You can only deselect the last chosen letter.");
+                return;
+            }
+        } else {
+            // Check adjacency (horizontal, vertical, diagonal)
+            if (state.selectedButtons.length > 0) {
+                let lastBtn = state.selectedButtons[state.selectedButtons.length - 1];
+                let r1 = parseInt(lastBtn.dataset.row), c1 = parseInt(lastBtn.dataset.col);
+                let r2 = parseInt(btn.dataset.row), c2 = parseInt(btn.dataset.col);
+                
+                if (Math.abs(r1 - r2) > 1 || Math.abs(c1 - c2) > 1) {
+                    announce("Invalid move. Select an adjacent letter.");
+                    return;
+                }
+            }
+            btn.setAttribute('aria-pressed', 'true');
+            state.selectedButtons.push(btn);
+            state.currentWord += btn.textContent;
+        }
+        
+        document.getElementById('current-word-display').textContent = state.currentWord;
+        wordAnnouncer.textContent = `Current word: ${state.currentWord}`;
+    }
+
+    function submitCurrentWord() {
+        if (state.currentWord.length < 3) {
+            announce("Word too short. Must be at least 3 letters.");
+            resetSelection();
+            return;
+        }
+
+        let player = state.players[state.currentPlayer];
+
+        if (player.words.includes(state.currentWord)) {
+            announce(`${state.currentWord} already found by you.`);
+        } 
+        else if (!validWords.has(state.currentWord)) {
+            // Note: For kids learning, you might remove strict dictionary checking
+            // and let them create anything, but this reinforces real words.
+            announce(`${state.currentWord} is not in the dictionary.`);
+        } 
+        else {
+            // Valid word!
+            let points = state.currentWord.length * 10;
+            player.score += points;
+            player.words.push(state.currentWord);
+            
+            if (state.currentWord.length > player.longest.length) {
+                player.longest = state.currentWord;
+            }
+            
+            announce(`Word accepted! ${state.currentWord} for ${points} points.`);
+            
+            // Turn switching for 2 player
+            if (state.mode === 2) {
+                state.currentPlayer = state.currentPlayer === 0 ? 1 : 0;
+            }
+            updateDisplay();
+        }
+        
+        resetSelection();
+        document.querySelector('.letter-btn').focus();
+    }
+
+    function resetSelection() {
+        state.selectedButtons.forEach(btn => btn.setAttribute('aria-pressed', 'false'));
+        state.selectedButtons = [];
+        state.currentWord = "";
+        document.getElementById('current-word-display').textContent = "";
+    }
+
+    function updateDisplay() {
+        let scoreText = state.mode === 1 
+            ? `Score: ${state.players[0].score}` 
+            : `P1: ${state.players[0].score} | P2: ${state.players[1].score}`;
+        
+        document.getElementById('score-display').textContent = scoreText;
+        
+        if (state.mode === 2) {
+            document.getElementById('turn-indicator').textContent = `Player ${state.currentPlayer + 1}'s Turn`;
+        } else {
+            document.getElementById('turn-indicator').textContent = "";
+        }
+    }
+
+    function startTimer() {
+        let timeLeft = state.time;
+        const timerDisplay = document.getElementById('timer-display');
+        
+        state.timerInterval = setInterval(() => {
+            timeLeft--;
+            let m = Math.floor(timeLeft / 60);
+            let s = timeLeft % 60;
+            timerDisplay.textContent = `Time: ${m}:${s < 10 ? '0' : ''}${s}`;
+            
+            if (timeLeft === 30 || timeLeft === 10) {
+                announce(`${timeLeft} seconds remaining!`);
+            }
+            
+            if (timeLeft <= 0) {
+                clearInterval(state.timerInterval);
+                endGame();
+            }
+        }, 1000);
+    }
+
+    function endGame() {
+        gameScreen.style.display = 'none';
+        endScreen.style.display = 'block';
+        
+        let p1 = state.players[0];
+        let p2 = state.players[1];
+        let resultHTML = "";
+        let resultText = "Time's up! ";
+
+        if (state.mode === 1) {
+            resultHTML = `
+                <h2>Final Score: ${p1.score}</h2>
+                <p>Words found: ${p1.words.length}</p>
+                <p>Longest word: ${p1.longest || 'None'}</p>
+            `;
+            resultText += `Your score is ${p1.score}. You found ${p1.words.length} words.`;
+        } else {
+            let winner = p1.score > p2.score ? "Player 1 Wins!" : (p2.score > p1.score ? "Player 2 Wins!" : "It's a Tie!");
+            resultHTML = `
+                <h2>${winner}</h2>
+                <p>Player 1 Score: ${p1.score} (${p1.words.length} words)</p>
+                <p>Player 2 Score: ${p2.score} (${p2.words.length} words)</p>
+            `;
+            resultText += `${winner}. Player 1 got ${p1.score} points, Player 2 got ${p2.score} points.`;
+        }
+        
+        document.getElementById('results').innerHTML = resultHTML;
+        announce(resultText);
+        
+        setTimeout(() => document.getElementById('restart-btn').focus(), 500);
+    }
+</script>
+</body>
+</html>
