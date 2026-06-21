@@ -209,7 +209,7 @@
         <div id="grid-container" role="group" aria-label="Letter Grid"></div>
 
         <div id="controls">
-            <button id="submit-btn" aria-label="Double click to submit word, or press Enter">Done (Double Click)</button>
+            <button id="submit-btn" aria-label="Click to submit word, or press Enter">Done (Click)</button>
         </div>
     </div>
 
@@ -220,9 +220,14 @@
     </div>
 
 <script>
-    // --- Basic Kid-Friendly Dictionary for Demo ---
-    // In a full production app, you would link this to a dictionary API.
-    const validWords = new Set(["CAT", "DOG", "BAT", "BALL", "APPLE", "SUN", "FUN", "RUN", "MAT", "HAT", "SIT", "MOM", "DAD", "BOY", "GIRL", "TREE", "CAR", "STAR", "FISH", "BIRD", "RED", "BLUE", "GREEN", "ONE", "TWO", "PLAY", "JUMP", "SING", "READ", "BOOK"]);
+    // --- Expanded Family-Friendly Dictionary ---
+    const validWords = new Set([
+        "CAT", "DOG", "BAT", "BALL", "APPLE", "SUN", "FUN", "RUN", "MAT", "HAT", "SIT", "MOM", "DAD", "BOY", "GIRL", 
+        "TREE", "CAR", "STAR", "FISH", "BIRD", "RED", "BLUE", "GREEN", "ONE", "TWO", "PLAY", "JUMP", "SING", "READ", "BOOK",
+        "HOME", "HOUSE", "SISTER", "BROTHER", "BABY", "FAMILY", "WATER", "FOOD", "MILK", "BREAD", "CAKE", "SMILE", "HAPPY", 
+        "LAUGH", "FRIEND", "SCHOOL", "TEACHER", "CLASS", "PAPER", "PEN", "DESK", "GAME", "WORD", "PLAY", "GOOD", "LOVE", 
+        "COLD", "WARM", "HOT", "SNOW", "RAIN", "WIND", "LAND", "SAND", "SHIP", "BOAT", "DUCK", "FROG", "LION", "BEAR", "WOLF"
+    ]);
 
     let state = {
         mode: 1, rows: 3, cols: 3, time: 60,
@@ -233,6 +238,99 @@
         currentWord: "",
         gridLetters: []
     };
+
+    // --- Web Audio Synthesizer for Accessibility Cues (Earcons) ---
+    let audioCtx = null;
+
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+    }
+
+    function playSound(type) {
+        if (!audioCtx) return;
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        const now = audioCtx.currentTime;
+        
+        if (type === 'success') {
+            // Ding (pleasant rising major chime)
+            const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+            notes.forEach((freq, index) => {
+                const osc = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, now + index * 0.08);
+                
+                gainNode.gain.setValueAtTime(0.15, now + index * 0.08);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + index * 0.08 + 0.15);
+                
+                osc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                
+                osc.start(now + index * 0.08);
+                osc.stop(now + index * 0.08 + 0.18);
+            });
+        } else if (type === 'error') {
+            // Bonk (low frequency sliding down triangle wave)
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.exponentialRampToValueAtTime(60, now + 0.2);
+            
+            gainNode.gain.setValueAtTime(0.2, now);
+            gainNode.gain.linearRampToValueAtTime(0.01, now + 0.2);
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            osc.start(now);
+            osc.stop(now + 0.2);
+        } else if (type === 'tick') {
+            // Short woodblock tick
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1000, now);
+            
+            gainNode.gain.setValueAtTime(0.08, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            osc.start(now);
+            osc.stop(now + 0.03);
+        }
+    }
+
+    // --- Free Dictionary API Helper ---
+    async function fetchDefinition(word) {
+        if (!word) return null;
+        try {
+            const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word.toLowerCase()}`);
+            if (!response.ok) return null;
+            const data = await response.json();
+            const definition = data[0]?.meanings[0]?.definitions[0]?.definition;
+            const partOfSpeech = data[0]?.meanings[0]?.partOfSpeech;
+            if (definition) {
+                return { definition, partOfSpeech };
+            }
+        } catch (e) {
+            console.error("Error fetching definition:", e);
+        }
+        return null;
+    }
 
     const vowels = "AEIOU";
     const consonants = "BCDFGHJKLMNPQRSTVWXYZ";
@@ -253,7 +351,7 @@
         document.getElementById('start-btn').focus();
     });
 
-    document.getElementById('submit-btn').addEventListener('dblclick', submitCurrentWord);
+    document.getElementById('submit-btn').addEventListener('click', submitCurrentWord);
 
     function announce(message) {
         announcer.textContent = '';
@@ -261,6 +359,8 @@
     }
 
     function startGame() {
+        // Unlock AudioContext for iOS/browser autoplay policies
+        initAudio();
         // Capture settings
         state.mode = parseInt(document.getElementById('mode').value);
         let size = document.getElementById('grid-size').value.split('x');
@@ -294,11 +394,13 @@
         state.gridLetters = [];
 
         for (let r = 0; r < state.rows; r++) {
+            let rowLetters = [];
             for (let c = 0; c < state.cols; c++) {
                 // Ensure a good mix of vowels and consonants
                 let isVowel = Math.random() > 0.6; 
                 let letterSet = isVowel ? vowels : consonants;
                 let letter = letterSet[Math.floor(Math.random() * letterSet.length)];
+                rowLetters.push(letter);
                 
                 let btn = document.createElement('button');
                 btn.className = 'letter-btn';
@@ -313,6 +415,7 @@
                 
                 gridContainer.appendChild(btn);
             }
+            state.gridLetters.push(rowLetters);
         }
     }
 
@@ -350,6 +453,7 @@
                 state.currentWord = state.currentWord.slice(0, -1);
             } else {
                 announce("You can only deselect the last chosen letter.");
+                playSound('error');
                 return;
             }
         } else {
@@ -361,6 +465,7 @@
                 
                 if (Math.abs(r1 - r2) > 1 || Math.abs(c1 - c2) > 1) {
                     announce("Invalid move. Select an adjacent letter.");
+                    playSound('error');
                     return;
                 }
             }
@@ -376,6 +481,7 @@
     function submitCurrentWord() {
         if (state.currentWord.length < 3) {
             announce("Word too short. Must be at least 3 letters.");
+            playSound('error');
             resetSelection();
             return;
         }
@@ -384,11 +490,11 @@
 
         if (player.words.includes(state.currentWord)) {
             announce(`${state.currentWord} already found by you.`);
+            playSound('error');
         } 
         else if (!validWords.has(state.currentWord)) {
-            // Note: For kids learning, you might remove strict dictionary checking
-            // and let them create anything, but this reinforces real words.
             announce(`${state.currentWord} is not in the dictionary.`);
+            playSound('error');
         } 
         else {
             // Valid word!
@@ -401,6 +507,7 @@
             }
             
             announce(`Word accepted! ${state.currentWord} for ${points} points.`);
+            playSound('success');
             
             // Turn switching for 2 player
             if (state.mode === 2) {
@@ -444,6 +551,11 @@
             let s = timeLeft % 60;
             timerDisplay.textContent = `Time: ${m}:${s < 10 ? '0' : ''}${s}`;
             
+            // Subtle ticking in the final 10 seconds
+            if (timeLeft <= 10 && timeLeft > 0) {
+                playSound('tick');
+            }
+
             if (timeLeft === 30 || timeLeft === 10) {
                 announce(`${timeLeft} seconds remaining!`);
             }
@@ -455,7 +567,7 @@
         }, 1000);
     }
 
-    function endGame() {
+    async function endGame() {
         gameScreen.style.display = 'none';
         endScreen.style.display = 'block';
         
@@ -463,8 +575,10 @@
         let p2 = state.players[1];
         let resultHTML = "";
         let resultText = "Time's up! ";
+        let longestWord = "";
 
         if (state.mode === 1) {
+            longestWord = p1.longest;
             resultHTML = `
                 <h2>Final Score: ${p1.score}</h2>
                 <p>Words found: ${p1.words.length}</p>
@@ -473,6 +587,7 @@
             resultText += `Your score is ${p1.score}. You found ${p1.words.length} words.`;
         } else {
             let winner = p1.score > p2.score ? "Player 1 Wins!" : (p2.score > p1.score ? "Player 2 Wins!" : "It's a Tie!");
+            longestWord = p1.longest.length >= p2.longest.length ? p1.longest : p2.longest;
             resultHTML = `
                 <h2>${winner}</h2>
                 <p>Player 1 Score: ${p1.score} (${p1.words.length} words)</p>
@@ -481,10 +596,32 @@
             resultText += `${winner}. Player 1 got ${p1.score} points, Player 2 got ${p2.score} points.`;
         }
         
+        if (longestWord) {
+            resultHTML += `
+                <div id="word-definition-box" style="margin-top: 20px; padding: 12px; background: #eef5fc; border-radius: 8px; border-left: 4px solid var(--primary); text-align: left; font-size: 15px;">
+                    <strong>Word of the Match:</strong> <span style="color: var(--primary); font-weight: bold;">${longestWord}</span><br>
+                    <span id="word-def-content" style="color: #666; font-style: italic;">Loading definition...</span>
+                </div>
+            `;
+        }
+
         document.getElementById('results').innerHTML = resultHTML;
         announce(resultText);
         
         setTimeout(() => document.getElementById('restart-btn').focus(), 500);
+
+        if (longestWord) {
+            const defData = await fetchDefinition(longestWord);
+            const defSpan = document.getElementById('word-def-content');
+            if (defSpan) {
+                if (defData) {
+                    defSpan.innerHTML = `(${defData.partOfSpeech}) ${defData.definition}`;
+                    announce(`Longest word of the match is ${longestWord}. Definition: ${defData.definition}`);
+                } else {
+                    defSpan.textContent = "Definition not found in dictionary.";
+                }
+            }
+        }
     }
 </script>
 </body>

@@ -15,7 +15,7 @@ A fun, interactive, and accessible word puzzle game. Perfect for solo players or
    - **Keyboard Navigation**: Use **Arrow Keys** to move between cells.
    - **Selection**: Click a letter to select it. To build a word, select adjacent letters (horizontally, vertically, or diagonally).
    - **Deselection**: Click the last selected letter again to deselect it.
-   - **Submit**: Double-click the **Done** button or press **Enter** while navigating the grid.
+   - **Submit**: Click the **Done** button or press **Enter** while navigating the grid.
 4. Correct words score points based on length (10 points per letter).
 5. In two-player mode, players take turns finding words. The turn switches once a player submits a valid word.
 
