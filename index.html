@@ -379,6 +379,12 @@
                 <option value="300">5 Minutes</option>
             </select>
         </div>
+        <div class="form-group">
+            <label for="announcement-interval">Voice Announcements (For Visually Impaired)</label>
+            <select id="announcement-interval">
+                <!-- Will be populated dynamically -->
+            </select>
+        </div>
         <button id="start-btn">Start Game</button>
     </div>
 
@@ -386,7 +392,7 @@
         <div id="turn-indicator" class="player-turn" aria-live="polite"></div>
         <div class="status-bar">
             <div id="score-display" aria-live="polite">Score: 0</div>
-            <div id="timer-display" aria-live="polite">Time: 1:00</div>
+            <div id="timer-display">Time: 1:00</div>
         </div>
 
         <div id="current-word-display" aria-hidden="true"></div>
@@ -414,6 +420,7 @@
 
     let state = {
         mode: 1, difficulty: 'easy', rows: 3, cols: 3, time: 60,
+        announcementInterval: "30",
         timerInterval: null,
         players: [{score: 0, words: [], longest: ""}, {score: 0, words: [], longest: ""}],
         currentPlayer: 0,
@@ -554,6 +561,9 @@
     const wordAnnouncer = document.getElementById('word-announcer');
 
     // Init
+    document.getElementById('time-limit').addEventListener('change', updateAnnouncementIntervalOptions);
+    updateAnnouncementIntervalOptions();
+
     document.getElementById('start-btn').addEventListener('click', startGame);
     document.getElementById('restart-btn').addEventListener('click', () => {
         endScreen.style.display = 'none';
@@ -562,6 +572,50 @@
     });
 
     document.getElementById('submit-btn').addEventListener('click', submitCurrentWord);
+
+    function updateAnnouncementIntervalOptions() {
+        const timeLimit = parseInt(document.getElementById('time-limit').value);
+        const intervalSelect = document.getElementById('announcement-interval');
+        const currentValue = intervalSelect.value;
+        
+        let options = [];
+        if (timeLimit === 60) {
+            options = [
+                { value: "15", text: "Every 15 Seconds" },
+                { value: "30", text: "Every 30 Seconds", selected: true },
+                { value: "off", text: "Off (Final 10s Only)" }
+            ];
+        } else if (timeLimit === 120) {
+            options = [
+                { value: "15", text: "Every 15 Seconds" },
+                { value: "30", text: "Every 30 Seconds", selected: true },
+                { value: "60", text: "Every 1 Minute" },
+                { value: "off", text: "Off (Final 10s Only)" }
+            ];
+        } else if (timeLimit === 300) {
+            options = [
+                { value: "30", text: "Every 30 Seconds" },
+                { value: "60", text: "Every 1 Minute", selected: true },
+                { value: "120", text: "Every 2 Minutes" },
+                { value: "off", text: "Off (Final 10s Only)" }
+            ];
+        }
+
+        intervalSelect.innerHTML = "";
+        options.forEach(opt => {
+            const optionEl = document.createElement('option');
+            optionEl.value = opt.value;
+            optionEl.textContent = opt.text;
+            if (currentValue && opt.value === currentValue) {
+                optionEl.selected = true;
+            } else if (!currentValue && opt.selected) {
+                optionEl.selected = true;
+            } else if (opt.selected && !options.some(o => o.value === currentValue)) {
+                optionEl.selected = true;
+            }
+            intervalSelect.appendChild(optionEl);
+        });
+    }
 
     function announce(message) {
         announcer.textContent = '';
@@ -578,6 +632,7 @@
         state.rows = parseInt(size[0]);
         state.cols = parseInt(size[1]);
         state.time = parseInt(document.getElementById('time-limit').value);
+        state.announcementInterval = document.getElementById('announcement-interval').value;
         
         // Reset state
         state.players = [{score: 0, words: [], longest: ""}, {score: 0, words: [], longest: ""}];
@@ -832,6 +887,19 @@
         }
     }
 
+    function formatTimeText(seconds) {
+        if (seconds <= 0) return "Time's up!";
+        let m = Math.floor(seconds / 60);
+        let s = seconds % 60;
+        if (m > 0) {
+            let mText = m === 1 ? "1 minute" : `${m} minutes`;
+            let sText = s > 0 ? ` and ${s} seconds` : "";
+            return `${mText}${sText} remaining`;
+        } else {
+            return `${seconds} seconds remaining`;
+        }
+    }
+
     function startTimer() {
         let timeLeft = state.time;
         const timerDisplay = document.getElementById('timer-display');
@@ -847,8 +915,19 @@
                 playSound('tick');
             }
 
-            if (timeLeft === 30 || timeLeft === 10) {
-                announce(`${timeLeft} seconds remaining!`);
+            const interval = state.announcementInterval;
+            if (interval !== 'off') {
+                const intervalNum = parseInt(interval);
+                const elapsed = state.time - timeLeft;
+                if (elapsed > 0 && elapsed % intervalNum === 0 && timeLeft > 0) {
+                    announce(formatTimeText(timeLeft));
+                } else if (timeLeft === 10 && (elapsed % intervalNum !== 0)) {
+                    announce("10 seconds remaining!");
+                }
+            } else {
+                if (timeLeft === 10) {
+                    announce("10 seconds remaining!");
+                }
             }
             
             if (timeLeft <= 0) {
