@@ -337,6 +337,21 @@
             15% { opacity: 1; transform: translateY(-20px) scale(1.1); }
             100% { transform: translateY(-80px) scale(0.9); opacity: 0; }
         }
+
+        @keyframes hintPulse {
+            0%, 100% { 
+                background-color: var(--grid-bg); 
+                box-shadow: 0 6px 0 #0d1222; 
+            }
+            50% { 
+                background-color: var(--secondary); 
+                box-shadow: 0 6px 0 #d35400, 0 0 20px rgba(243, 156, 18, 0.6); 
+                border-color: var(--secondary);
+            }
+        }
+        .hint-highlight {
+            animation: hintPulse 1.0s infinite ease-in-out !important;
+        }
     </style>
 </head>
 <body>
@@ -357,6 +372,7 @@
         <div class="form-group">
             <label for="difficulty">Difficulty</label>
             <select id="difficulty">
+                <option value="kids">Kids Mode (Hints & Simple Words)</option>
                 <option value="easy" selected>Easy (Simple Words)</option>
                 <option value="medium">Medium</option>
                 <option value="hard">Hard (All Words)</option>
@@ -399,8 +415,10 @@
         
         <div id="grid-container" role="group" aria-label="Letter Grid"></div>
 
-        <div id="controls">
+        <div id="controls" style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
             <button id="submit-btn" aria-label="Click to submit word, or press Enter">Done (Click)</button>
+            <button id="hint-btn" style="display: none; background: var(--primary-gradient); color: white; width: auto; padding: 14px 30px;" aria-label="Show a hint letter">Hint</button>
+            <button id="end-game-btn" style="display: none; background: var(--error); color: white; width: auto; padding: 14px 30px;" aria-label="End game and show final scores">End Game</button>
         </div>
     </div>
 
@@ -417,6 +435,7 @@
     const easyWords = new Set(wordList.slice(0, 1500));
     const mediumWords = new Set(wordList.slice(0, 4000));
     const hardWords = validWords;
+    const kidsWords = new Set(wordList.slice(0, 1000).filter(w => w.length === 3 || w.length === 4));
 
     let state = {
         mode: 1, difficulty: 'easy', rows: 3, cols: 3, time: 60,
@@ -466,6 +485,24 @@
         const now = audioCtx.currentTime;
         
         if (type === 'success') {
+            if (state.difficulty === 'kids') {
+                // Cute bubble chime (fast rising arpeggio with soft triangle wave)
+                let notes = [659.25, 880.00, 1046.50, 1318.51];
+                notes.forEach((freq, index) => {
+                    const osc = audioCtx.createOscillator();
+                    const gainNode = audioCtx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, now + index * 0.05);
+                    gainNode.gain.setValueAtTime(0.1, now + index * 0.05);
+                    gainNode.gain.exponentialRampToValueAtTime(0.005, now + index * 0.05 + 0.1);
+                    osc.connect(gainNode);
+                    gainNode.connect(audioCtx.destination);
+                    osc.start(now + index * 0.05);
+                    osc.stop(now + index * 0.05 + 0.12);
+                });
+                return;
+            }
+
             // Ding (pleasant rising major chime scaling by word length)
             let notes = [523.25, 659.25, 783.99]; // C5, E5, G5
             const wordLen = arguments[1] || 3;
@@ -561,8 +598,9 @@
     const wordAnnouncer = document.getElementById('word-announcer');
 
     // Init
+    document.getElementById('difficulty').addEventListener('change', updateSetupScreenOptions);
     document.getElementById('time-limit').addEventListener('change', updateAnnouncementIntervalOptions);
-    updateAnnouncementIntervalOptions();
+    updateSetupScreenOptions();
 
     document.getElementById('start-btn').addEventListener('click', startGame);
     document.getElementById('restart-btn').addEventListener('click', () => {
@@ -572,10 +610,192 @@
     });
 
     document.getElementById('submit-btn').addEventListener('click', submitCurrentWord);
+    document.getElementById('hint-btn').addEventListener('click', showHint);
+    document.getElementById('end-game-btn').addEventListener('click', () => {
+        clearInterval(state.timerInterval);
+        endGame();
+    });
+
+    function canFormWordFrom(grid, word, r, c) {
+        const rows = grid.length;
+        const cols = grid[0].length;
+        const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+        
+        function dfs(index, curR, curC) {
+            if (index === word.length) return true;
+            if (curR < 0 || curR >= rows || curC < 0 || curC >= cols || visited[curR][curC] || grid[curR][curC] !== word[index]) {
+                return false;
+            }
+            
+            visited[curR][curC] = true;
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    if (dr === 0 && dc === 0) continue;
+                    if (dfs(index + 1, curR + dr, curC + dc)) return true;
+                }
+            }
+            visited[curR][curC] = false;
+            return false;
+        }
+        
+        return dfs(0, r, c);
+    }
+
+    function canFormWordFromStraightLine(grid, word, r, c) {
+        const rows = grid.length;
+        const cols = grid[0].length;
+        const directions = [
+            [-1, -1], [-1, 0], [-1, 1],
+            [0, -1],           [0, 1],
+            [1, -1],  [1, 0],  [1, 1]
+        ];
+        
+        for (const [dr, dc] of directions) {
+            let matched = true;
+            for (let i = 0; i < word.length; i++) {
+                let curR = r + dr * i;
+                let curC = c + dc * i;
+                if (curR < 0 || curR >= rows || curC < 0 || curC >= cols || grid[curR][curC] !== word[i]) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return true;
+        }
+        return false;
+    }
+
+    function findWordStartPos(grid, word) {
+        const rows = grid.length;
+        const cols = grid[0].length;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                if (grid[r][c] === word[0]) {
+                    const isPossible = state.difficulty === 'kids' 
+                        ? canFormWordFromStraightLine(grid, word, r, c)
+                        : canFormWordFrom(grid, word, r, c);
+                    if (isPossible) {
+                        return { r, c };
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    function showHint() {
+        const activeDict = state.difficulty === 'kids' ? kidsWords 
+            : (state.difficulty === 'easy' ? easyWords 
+            : (state.difficulty === 'medium' ? mediumWords : hardWords));
+            
+        const allWords = state.difficulty === 'kids' 
+            ? solveGridStraightLines(state.gridLetters, activeDict)
+            : solveGrid(state.gridLetters, activeDict);
+            
+        const foundWords = state.players[state.currentPlayer].words;
+        const remainingWords = [...allWords].filter(w => !foundWords.includes(w));
+        
+        if (remainingWords.length === 0) {
+            announce("No more words to find in this grid!");
+            return;
+        }
+        
+        // Pick a random word
+        const targetWord = remainingWords[Math.floor(Math.random() * remainingWords.length)];
+        const startPos = findWordStartPos(state.gridLetters, targetWord);
+        
+        if (startPos) {
+            const { r, c } = startPos;
+            const btn = document.querySelector(`.letter-btn[data-row="${r}"][data-col="${c}"]`);
+            if (btn) {
+                document.querySelectorAll('.letter-btn').forEach(b => b.classList.remove('hint-highlight'));
+                
+                btn.classList.add('hint-highlight');
+                announce(`Hint: Try starting with the letter ${state.gridLetters[r][c]} at row ${r + 1}, column ${c + 1}.`);
+                
+                setTimeout(() => {
+                    btn.classList.remove('hint-highlight');
+                }, 4000);
+            }
+        } else {
+            announce("Hint could not find starting position.");
+        }
+    }
+
+    function updateSetupScreenOptions() {
+        const difficulty = document.getElementById('difficulty').value;
+        const timeLimitSelect = document.getElementById('time-limit');
+        const gridSizeSelect = document.getElementById('grid-size');
+        
+        const currentTimeVal = timeLimitSelect.value;
+        const currentGridVal = gridSizeSelect.value;
+
+        if (difficulty === 'kids') {
+            // Kids Mode limits: No Limit, 2 Min, 5 Min
+            timeLimitSelect.innerHTML = `
+                <option value="off">No Limit</option>
+                <option value="120">2 Minutes</option>
+                <option value="300">5 Minutes</option>
+            `;
+            if (currentTimeVal === '120' || currentTimeVal === '300' || currentTimeVal === 'off') {
+                timeLimitSelect.value = currentTimeVal;
+            } else {
+                timeLimitSelect.value = 'off';
+            }
+
+            // Kids Mode grids: 3x3, 4x4
+            gridSizeSelect.innerHTML = `
+                <option value="3x3">3 × 3</option>
+                <option value="4x4">4 × 4</option>
+            `;
+            if (currentGridVal === '3x3' || currentGridVal === '4x4') {
+                gridSizeSelect.value = currentGridVal;
+            } else {
+                gridSizeSelect.value = '3x3';
+            }
+        } else {
+            // Standard limits: 1 Min, 2 Min, 5 Min
+            timeLimitSelect.innerHTML = `
+                <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
+                <option value="300">5 Minutes</option>
+            `;
+            if (currentTimeVal === '60' || currentTimeVal === '120' || currentTimeVal === '300') {
+                timeLimitSelect.value = currentTimeVal;
+            } else {
+                timeLimitSelect.value = '60';
+            }
+
+            // Standard grids: 3x3, 4x4, 5x4, 5x5
+            gridSizeSelect.innerHTML = `
+                <option value="3x3">3 × 3</option>
+                <option value="4x4">4 × 4</option>
+                <option value="5x4">5 × 4</option>
+                <option value="5x5">5 × 5</option>
+            `;
+            if (currentGridVal === '3x3' || currentGridVal === '4x4' || currentGridVal === '5x4' || currentGridVal === '5x5') {
+                gridSizeSelect.value = currentGridVal;
+            } else {
+                gridSizeSelect.value = '3x3';
+            }
+        }
+
+        updateAnnouncementIntervalOptions();
+    }
 
     function updateAnnouncementIntervalOptions() {
-        const timeLimit = parseInt(document.getElementById('time-limit').value);
+        const timeLimitVal = document.getElementById('time-limit').value;
         const intervalSelect = document.getElementById('announcement-interval');
+        const annGroup = intervalSelect.parentElement || { style: {} };
+        
+        if (timeLimitVal === 'off') {
+            annGroup.style.display = 'none';
+            return;
+        } else {
+            annGroup.style.display = 'block';
+        }
+
+        const timeLimit = parseInt(timeLimitVal);
         const currentValue = intervalSelect.value;
         
         let options = [];
@@ -631,8 +851,32 @@
         let size = document.getElementById('grid-size').value.split('x');
         state.rows = parseInt(size[0]);
         state.cols = parseInt(size[1]);
-        state.time = parseInt(document.getElementById('time-limit').value);
+        
+        const timeLimitVal = document.getElementById('time-limit').value;
+        if (timeLimitVal === 'off') {
+            state.time = 0;
+            state.isUntimed = true;
+        } else {
+            state.time = parseInt(timeLimitVal);
+            state.isUntimed = false;
+        }
+        
         state.announcementInterval = document.getElementById('announcement-interval').value;
+        
+        // Toggle Kids Mode buttons
+        const hintBtn = document.getElementById('hint-btn');
+        const endGameBtn = document.getElementById('end-game-btn');
+        if (state.difficulty === 'kids') {
+            hintBtn.style.display = 'inline-flex';
+            if (state.isUntimed) {
+                endGameBtn.style.display = 'inline-flex';
+            } else {
+                endGameBtn.style.display = 'none';
+            }
+        } else {
+            hintBtn.style.display = 'none';
+            endGameBtn.style.display = 'none';
+        }
         
         // Reset state
         state.players = [{score: 0, words: [], longest: ""}, {score: 0, words: [], longest: ""}];
@@ -648,7 +892,8 @@
         startTimer();
         
         let modeText = state.mode === 1 ? "Single player game started." : "Two player game started. Player 1's turn.";
-        announce(`${modeText} You have ${state.time} seconds. Use arrow keys to navigate the grid.`);
+        let timeText = state.isUntimed ? "unlimited time" : `${state.time} seconds`;
+        announce(`${modeText} You have ${timeText}. Use arrow keys to navigate the grid.`);
         
         // Focus first letter
         setTimeout(() => document.querySelector('.letter-btn').focus(), 100);
@@ -694,16 +939,53 @@
         return foundWords;
     }
 
+    function solveGridStraightLines(grid, dictSet, minLen = 3, maxLen = 4) {
+        const rows = grid.length;
+        const cols = grid[0].length;
+        const foundWords = new Set();
+        
+        const directions = [
+            [-1, -1], [-1, 0], [-1, 1],
+            [0, -1],           [0, 1],
+            [1, -1],  [1, 0],  [1, 1]
+        ];
+        
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                for (const [dr, dc] of directions) {
+                    let currentStr = "";
+                    let curR = r;
+                    let curC = c;
+                    while (curR >= 0 && curR < rows && curC >= 0 && curC < cols && currentStr.length < maxLen) {
+                        currentStr += grid[curR][curC];
+                        if (currentStr.length >= minLen) {
+                            if (dictSet.has(currentStr)) {
+                                foundWords.add(currentStr);
+                            }
+                        }
+                        curR += dr;
+                        curC += dc;
+                    }
+                }
+            }
+        }
+        return foundWords;
+    }
+
     function generateGrid() {
-        const activeDict = state.difficulty === 'easy' ? easyWords : (state.difficulty === 'medium' ? mediumWords : hardWords);
+        const activeDict = state.difficulty === 'kids' ? kidsWords 
+            : (state.difficulty === 'easy' ? easyWords 
+            : (state.difficulty === 'medium' ? mediumWords : hardWords));
 
         let threshold = 5;
         if (state.rows === 3) {
-            if (state.difficulty === 'easy') threshold = 6;
+            if (state.difficulty === 'kids') threshold = 4;
+            else if (state.difficulty === 'easy') threshold = 6;
             else if (state.difficulty === 'medium') threshold = 4;
             else threshold = 3;
         } else if (state.rows === 4) {
-            if (state.difficulty === 'easy') threshold = 15;
+            if (state.difficulty === 'kids') threshold = 8;
+            else if (state.difficulty === 'easy') threshold = 15;
             else if (state.difficulty === 'medium') threshold = 10;
             else threshold = 6;
         } else { // 5x4 or 5x5
@@ -726,7 +1008,10 @@
                 tempGrid.push(rowLetters);
             }
 
-            const found = solveGrid(tempGrid, activeDict);
+            const found = state.difficulty === 'kids' 
+                ? solveGridStraightLines(tempGrid, activeDict) 
+                : solveGrid(tempGrid, activeDict);
+                
             if (found.size >= threshold) {
                 bestGrid = tempGrid;
                 bestWords = found;
@@ -813,6 +1098,22 @@
                     playSound('error');
                     return;
                 }
+
+                // Enforce straight lines in Kids Mode
+                if (state.difficulty === 'kids' && state.selectedButtons.length > 1) {
+                    let firstBtn = state.selectedButtons[0];
+                    let secondBtn = state.selectedButtons[1];
+                    let dr = parseInt(secondBtn.dataset.row) - parseInt(firstBtn.dataset.row);
+                    let dc = parseInt(secondBtn.dataset.col) - parseInt(firstBtn.dataset.col);
+                    
+                    let targetR = r1 + dr;
+                    let targetC = c1 + dc;
+                    if (r2 !== targetR || c2 !== targetC) {
+                        announce("Invalid move. In Kids Mode, words must be in a straight line.");
+                        playSound('error');
+                        return;
+                    }
+                }
             }
             btn.setAttribute('aria-pressed', 'true');
             state.selectedButtons.push(btn);
@@ -832,12 +1133,15 @@
         }
 
         let player = state.players[state.currentPlayer];
+        const activeDict = state.difficulty === 'kids' ? kidsWords 
+            : (state.difficulty === 'easy' ? easyWords 
+            : (state.difficulty === 'medium' ? mediumWords : hardWords));
 
         if (player.words.includes(state.currentWord)) {
             announce(`${state.currentWord} already found by you.`);
             playSound('error');
         } 
-        else if (!(state.difficulty === 'easy' ? easyWords : (state.difficulty === 'medium' ? mediumWords : hardWords)).has(state.currentWord)) {
+        else if (!activeDict.has(state.currentWord)) {
             announce(`${state.currentWord} is not in the dictionary.`);
             playSound('error');
         } 
@@ -901,8 +1205,13 @@
     }
 
     function startTimer() {
-        let timeLeft = state.time;
         const timerDisplay = document.getElementById('timer-display');
+        if (state.isUntimed) {
+            timerDisplay.textContent = "Time: Unlimited";
+            return;
+        }
+
+        let timeLeft = state.time;
         
         state.timerInterval = setInterval(() => {
             timeLeft--;
@@ -944,7 +1253,7 @@
         let p1 = state.players[0];
         let p2 = state.players[1];
         let resultHTML = "";
-        let resultText = "Time's up! ";
+        let resultText = state.isUntimed ? "Game finished! " : "Time's up! ";
         let longestWord = "";
 
         if (state.mode === 1) {
@@ -1084,7 +1393,14 @@
         
         const messages = ["Sweet!", "Awesome!", "Nice!", "Excellent!", "Fantastic!", "Genius!", "Superb!", "Brilliant!"];
         const msg = messages[Math.floor(Math.random() * messages.length)];
-        popup.textContent = `${msg} +${points}`;
+        
+        if (state.difficulty === 'kids') {
+            const kidsEmojis = ["🎈", "🌟", "🦄", "🦖", "🏆", "🐱", "🍭", "🚀", "🎨", "🦁", "🐳"];
+            const emoji = kidsEmojis[Math.floor(Math.random() * kidsEmojis.length)];
+            popup.textContent = `${emoji} ${msg} +${points} ${emoji}`;
+        } else {
+            popup.textContent = `${msg} +${points}`;
+        }
         
         popup.style.left = `${rect.left + rect.width / 2 - 80 + (Math.random() - 0.5) * 40}px`;
         popup.style.top = `${rect.top - 20}px`;
